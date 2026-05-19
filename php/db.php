@@ -6,14 +6,14 @@ $user = 'root';
 $pass = '';
 $db   = 'student_budget_management';
 
+// Disable mysqli errors
+mysqli_report(MYSQLI_REPORT_OFF);
+
 // Create connection
-$conn = new mysqli($host, $user, $pass, $db, $port);
+$conn = @new mysqli($host, $user, $pass, $db, $port);
 
 // Check connection
 if ($conn->connect_error) {
-    die("Database not connected yet.");
+    $conn = null;
 }
-
-// Optional: Set character set to UTF-8 for international support
-$conn->set_charset("utf8mb4");
 ?>
