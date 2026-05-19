@@ -1,3 +1,7 @@
+<?php
+session_start();
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -15,11 +19,11 @@
             <h4 class="text-center mb-4">Create an Account</h4>
 
             <?php
-            session_start();
             if (isset($_SESSION['register_error'])) {
                 echo "<div class='alert alert-danger'>" . $_SESSION['register_error'] . "</div>";
                 unset($_SESSION['register_error']);
             }
+
             if (isset($_SESSION['register_success'])) {
                 echo "<div class='alert alert-success'>" . $_SESSION['register_success'] . "</div>";
                 unset($_SESSION['register_success']);
