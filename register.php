@@ -1,50 +1,95 @@
 <?php
 session_start();
 
-require_once 'db.php';
+require_once 'php/db.php';
 
-// Check database connection
 if ($conn === null) {
-
     $_SESSION['register_error'] = "Database not connected.";
-
-    header("Location: ../register.php");
-    exit();
 }
-
-// Get form data
-$name = $_POST['name'];
-$email = $_POST['email'];
-$password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-
-// Insert query
-$sql = "INSERT INTO users (name, email, password) VALUES (?, ?, ?)";
-
-// Prepare statement
-$stmt = $conn->prepare($sql);
-
-// Execute if statement works
-if ($stmt) {
-
-    $stmt->bind_param("sss", $name, $email, $password);
-
-    if ($stmt->execute()) {
-
-        $_SESSION['register_success'] = "Registration successful!";
-
-    } else {
-
-        $_SESSION['register_error'] = "Registration failed!";
-    }
-
-    $stmt->close();
-
-} else {
-
-    $_SESSION['register_error'] = "Database prepare failed.";
-}
-
-header("Location: ../register.php");
-exit();
-
 ?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - Student Budget Tracker</title>
+
+    <link rel="stylesheet" href="assets/bootstrap/css/bootstrap.min.css">
+
+    <style>
+        /* ... your styles ... */
+    </style>
+</head>
+
+<body class="bg-light">
+
+<div class="container d-flex justify-content-center align-items-center" style="height: 100vh;">
+
+    <div class="card shadow p-4" style="width: 100%; max-width: 400px;">
+
+        <h4 class="text-center mb-4">Create an Account</h4>
+
+        <?php
+        if (isset($_SESSION['register_error'])) {
+            echo "<div class='alert alert-danger'>" . $_SESSION['register_error'] . "</div>";
+            unset($_SESSION['register_error']);
+        }
+
+        if (isset($_SESSION['register_success'])) {
+            echo "<div class='alert alert-success'>" . $_SESSION['register_success'] . "</div>";
+            unset($_SESSION['register_success']);
+        }
+        ?>
+
+        <form action="php/register.php" method="post">
+
+            <div class="form-group">
+                <label for="name">Full Name</label>
+
+                <input type="text"
+                       class="form-control"
+                       id="name"
+                       name="name"
+                       placeholder="Enter your name"
+                       required>
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email address</label>
+
+                <input type="email"
+                       class="form-control"
+                       id="email"
+                       name="email"
+                       placeholder="Enter email"
+                       required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Create Password</label>
+
+                <input type="password"
+                       class="form-control"
+                       id="password"
+                       name="password"
+                       placeholder="Enter password"
+                       required>
+            </div>
+
+            <button type="submit" class="btn btn-success btn-block">
+                Register
+            </button>
+
+        </form>
+
+        <div class="text-center mt-3">
+            <a href="index.php">Back to Login</a>
+        </div>
+
+    </div>
+
+</div>
+
+</body>
+</html>
