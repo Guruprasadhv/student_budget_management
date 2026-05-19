@@ -1,21 +1,22 @@
 <?php
 
-// Disable MySQL fatal errors
 mysqli_report(MYSQLI_REPORT_OFF);
 
-// Database configuration
-$host = "localhost";
-$port = 3306;
-$user = "root";
-$pass = "";
-$db   = "student_budget_management";
+// Railway MySQL credentials
+$host = "YOUR_HOST";
+$port = YOUR_PORT;
+$user = "YOUR_USER";
+$pass = "YOUR_PASSWORD";
+$db   = "YOUR_DATABASE";
 
 // Create connection
-$conn = @new mysqli($host, $user, $pass, $db, $port);
+$conn = new mysqli($host, $user, $pass, $db, $port);
 
-// If database fails, stop crashing
+// Check connection
 if ($conn->connect_error) {
-    $conn = null;
+    die("Database connection failed.");
 }
+
+$conn->set_charset("utf8mb4");
 
 ?>
