@@ -1,7 +1,7 @@
 <?php
 // Database configuration
 $host = 'localhost';
-$port = 3306; // Change if you're using a custom port like 3309
+$port = 3306;
 $user = 'root';
 $pass = '';
 $db   = 'student_budget_management';
@@ -11,7 +11,7 @@ $conn = new mysqli($host, $user, $pass, $db, $port);
 
 // Check connection
 if ($conn->connect_error) {
-    die("Database connection failed: " . $conn->connect_error);
+    die("Database not connected yet.");
 }
 
 // Optional: Set character set to UTF-8 for international support
