@@ -5,17 +5,8 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-// DB connection
-$host = 'localhost';
-$user = 'root';
-$password = '';
-$db = 'student_budget_management';
-$port = 3306;
-
-$conn = new mysqli($host, $user, $password, $db, $port);
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+// Use shared DB connection
+require_once __DIR__ . '/php/db.php';
 
 $user_id = $_SESSION['user_id'];
 

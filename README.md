@@ -123,6 +123,35 @@ Below are sample screenshots of the main pages in the Student Budget Management 
 - **Blank pages or errors:** Check XAMPP's Apache error log for details.
 - **Port conflicts:** Make sure Apache and MySQL are running on their default ports (80/3306) or update your configuration accordingly.
 
+## Using a remote (online) MySQL database
+
+This project supports connecting to a remote MySQL host (for example, a cloud or shared hosting database). There are two recommended ways to provide credentials:
+
+1. Environment variables provided by the host (recommended)
+2. A local `.env` file in the project root (convenient for development)
+
+The following environment variables are used by the application (see `php/db.php`):
+
+- `DB_HOST` — host or IP of the MySQL server (or socket path)
+- `DB_PORT` — TCP port (default 3306)
+- `DB_USER` — database username
+- `DB_PASS` — database password
+- `DB_NAME` — database name
+
+Quick steps to use a remote MySQL host:
+
+- Copy `.env.example` to `.env` in the project root and fill in your remote credentials.
+- Make sure `.env` is NOT committed (this repo already includes `.gitignore` to ignore it).
+- If your hosting provider gives you environment variables (e.g., on platforms like Heroku, Render, or managed hosting), set those instead of using a `.env` file.
+- Upload/import the `student_budget_management.sql` into your remote database (use phpMyAdmin, MySQL Workbench, or the host's import tools).
+
+Tips & troubleshooting when using remote MySQL:
+
+- Ensure the remote MySQL server allows connections from your web host (some hosts block external IPs).
+- If using a managed PHP host, use the credentials provided by their control panel and set them as environment variables when the host supports it.
+- Check for common errors in your web server logs if a connection fails.
+
+
 ---
 
 ## License

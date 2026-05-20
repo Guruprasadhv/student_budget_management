@@ -1,0 +1,11 @@
+# Ignore local environment file containing secrets
+.env
+
+# OS files
+.DS_Store
+
+# PHPStorm / IDE
+.idea/
+
+# Composer vendor (if used)
+/vendor/

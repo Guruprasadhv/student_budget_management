@@ -7,19 +7,8 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-// DB Config
-$host = 'localhost';
-$user = 'root';
-$password = ''; // Change if you set a root password
-$db = 'student_budget_management';
-$port = 3306; // Change to 3309 if you're sure MySQL runs on that port
-
-$conn = new mysqli($host, $user, $password, $db, $port);
-
-// Check connection
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+// Use shared DB connection
+require_once __DIR__ . '/php/db.php';
 
 $success = "";
 $error = "";

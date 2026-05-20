@@ -22,16 +22,8 @@ if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
-// Database connection - UPDATE THESE WITH YOUR CREDENTIALS
-$db_host = 'localhost';
-$db_user = 'root'; // Default XAMPP username
-$db_pass = '';     // Default XAMPP password (empty)
-$db_name = 'budget_tracker';
-
-$conn = new mysqli("localhost", "root", "", "student_budget_management");
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+// Use central DB connection
+require_once __DIR__ . '/php/db.php';
 
 $user_id = $_SESSION['user_id'];
 
