@@ -15,7 +15,6 @@ if (isset($_SESSION['user_id'])) {
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="bg-light">
-     <a href="https://guruprasadhv.github.io/student_budget_management/" target="_blank" class="overlay-btn">Live Demo</a>
     <div class="container d-flex justify-content-center align-items-center" style="height: 100vh;">
         <div class="card shadow p-4" style="width: 100%; max-width: 400px;">
             <h4 class="text-center mb-4">Student Budget Tracker Login</h4>
