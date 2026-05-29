@@ -22,9 +22,9 @@ $token = filter_input(INPUT_GET, 'token', FILTER_SANITIZE_STRING);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://stackpath.bootstrapcdn.com; style-src 'self' https://stackpath.bootstrapcdn.com; img-src 'self' data:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;">
     <title>Reset Password - Student Budget Tracker</title>
-    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+    <link href="assets/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
             background-color: #f8f9fa;
@@ -109,73 +109,66 @@ $token = filter_input(INPUT_GET, 'token', FILTER_SANITIZE_STRING);
             </form>
 
             <div class="text-center mt-3">
-                <a href="login.php" class="text-primary">Back to Login</a>
+                <a href="index.php" class="text-primary">Back to Login</a>
             </div>
         </div>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js" integrity="sha384-DfXdz2htPH0lsSSs5nCTpuj/zy4C+OGpamoFVy38MVBnE+IbbVYUew+OrCXaRkfj" crossorigin="anonymous"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.bundle.min.js" integrity="sha384-LtrjvnR4Twt/qOuYxE721u19sVFLVSA4hf/rRt6PrZTmiPltdZcI7q7PXQBYTKyf" crossorigin="anonymous"></script>
-    
     <script>
-        $(document).ready(function() {
-            // Password strength indicator
-            $('#new_password').on('input', function() {
-                const password = $(this).val();
-                const strengthMeter = $('#password-strength');
+        document.addEventListener('DOMContentLoaded', function() {
+            const newPassword = document.getElementById('new_password');
+            const confirmPassword = document.getElementById('confirm_password');
+            const strengthMeter = document.getElementById('password-strength');
+            const feedback = document.getElementById('password-match-feedback');
+            const resetForm = document.getElementById('resetForm');
+
+            newPassword.addEventListener('input', function() {
+                const password = this.value;
                 let strength = 0;
-                
-                // Length check
+
                 if (password.length >= 8) strength += 1;
-                // Lowercase check
                 if (password.match(/[a-z]/)) strength += 1;
-                // Uppercase check
                 if (password.match(/[A-Z]/)) strength += 1;
-                // Number check
                 if (password.match(/[0-9]/)) strength += 1;
-                // Special char check
                 if (password.match(/[^a-zA-Z0-9]/)) strength += 1;
-                
-                // Update meter
+
                 const colors = ['#dc3545', '#fd7e14', '#ffc107', '#28a745', '#218838'];
-                const width = (strength / 5) * 100;
-                strengthMeter.css('width', width + '%');
-                strengthMeter.css('background-color', colors[strength - 1] || '#e9ecef');
+                strengthMeter.style.width = (strength / 5) * 100 + '%';
+                strengthMeter.style.backgroundColor = colors[strength - 1] || '#e9ecef';
             });
 
-            // Password match checker
-            $('#confirm_password').on('input', function() {
-                const password = $('#new_password').val();
-                const confirmPassword = $(this).val();
-                const feedback = $('#password-match-feedback');
-                
-                if (confirmPassword === '') {
-                    feedback.text('').removeClass('text-danger text-success');
-                } else if (password === confirmPassword) {
-                    feedback.text('Passwords match').removeClass('text-danger').addClass('text-success');
+            confirmPassword.addEventListener('input', function() {
+                const password = newPassword.value;
+                const confirm = this.value;
+
+                if (confirm === '') {
+                    feedback.textContent = '';
+                    feedback.classList.remove('text-danger', 'text-success');
+                } else if (password === confirm) {
+                    feedback.textContent = 'Passwords match';
+                    feedback.classList.remove('text-danger');
+                    feedback.classList.add('text-success');
                 } else {
-                    feedback.text('Passwords do not match').removeClass('text-success').addClass('text-danger');
+                    feedback.textContent = 'Passwords do not match';
+                    feedback.classList.remove('text-success');
+                    feedback.classList.add('text-danger');
                 }
             });
 
-            // Form validation
-            $('#resetForm').on('submit', function(e) {
-                const password = $('#new_password').val();
-                const confirmPassword = $('#confirm_password').val();
-                
+            resetForm.addEventListener('submit', function(e) {
+                const password = newPassword.value;
+                const confirm = confirmPassword.value;
+
                 if (password.length < 8) {
                     e.preventDefault();
                     alert('Password must be at least 8 characters long');
-                    return false;
+                    return;
                 }
-                
-                if (password !== confirmPassword) {
+
+                if (password !== confirm) {
                     e.preventDefault();
                     alert('Passwords do not match');
-                    return false;
                 }
-                
-                return true;
             });
         });
     </script>

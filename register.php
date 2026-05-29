@@ -44,8 +44,8 @@ if ($conn === null) {
 
         <form action="php/register.php" method="post">
 
-            <div class="form-group">
-                <label for="name">Full Name</label>
+            <div class="mb-3">
+                <label for="name" class="form-label">Full Name</label>
 
                 <input type="text"
                        class="form-control"
@@ -55,8 +55,8 @@ if ($conn === null) {
                        required>
             </div>
 
-            <div class="form-group">
-                <label for="email">Email address</label>
+            <div class="mb-3">
+                <label for="email" class="form-label">Email address</label>
 
                 <input type="email"
                        class="form-control"
@@ -66,8 +66,8 @@ if ($conn === null) {
                        required>
             </div>
 
-            <div class="form-group">
-                <label for="password">Create Password</label>
+            <div class="mb-3">
+                <label for="password" class="form-label">Create Password</label>
 
                 <input type="password"
                        class="form-control"
@@ -77,7 +77,7 @@ if ($conn === null) {
                        required>
             </div>
 
-            <button type="submit" class="btn btn-success btn-block">
+            <button type="submit" class="btn btn-success w-100 mt-2">
                 Register
             </button>
 

@@ -1,4 +1,5 @@
 <?php
+session_start();
 require_once(__DIR__ . '/db.php');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -8,12 +9,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Basic validation
     if (empty($name) || empty($email) || empty($password)) {
-        echo "All fields are required.";
+        $_SESSION['register_error'] = "All fields are required.";
+        header("Location: ../register.php");
         exit();
     }
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        echo "Invalid email format.";
+        $_SESSION['register_error'] = "Invalid email format.";
+        header("Location: ../register.php");
         exit();
     }
 
@@ -27,7 +30,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $check->store_result();
 
     if ($check->num_rows > 0) {
-        echo "Email already registered.";
+        $_SESSION['register_error'] = "Email already registered.";
+        header("Location: ../register.php");
         exit();
     }
     $check->close();
@@ -38,14 +42,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $stmt->bind_param("sss", $name, $email, $hashed_password);
 
     if ($stmt->execute()) {
-        header("Location: ../index.php?register=success");
+        $newUserId = $stmt->insert_id;
+        $settingsStmt = $conn->prepare("INSERT INTO settings (user_id, preferred_currency, language) VALUES (?, 'INR', 'en')");
+        if ($settingsStmt) {
+            $settingsStmt->bind_param("i", $newUserId);
+            $settingsStmt->execute();
+            $settingsStmt->close();
+        }
+        $_SESSION['register_success'] = "Registration successful! Please login.";
+        header("Location: ../register.php");
         exit();
     } else {
-        echo "Error: " . $stmt->error;
+        $_SESSION['register_error'] = "Error: " . $stmt->error;
+        header("Location: ../register.php");
+        exit();
     }
 
     $stmt->close();
 } else {
-    echo "Invalid request.";
+    $_SESSION['register_error'] = "Invalid request.";
+    header("Location: ../register.php");
+    exit();
 }
 ?>

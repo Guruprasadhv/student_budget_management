@@ -1,20 +1,25 @@
 <?php
 session_start();
-require_once('php/db.php');
-// require 'vendor/autoload.php'; // If using Composer autoload
-use PhpOffice\PhpSpreadsheet\IOFactory;
+require_once __DIR__ . '/php/db.php';
+require_once __DIR__ . '/php/languages.php';
+require_once __DIR__ . '/php/account_helpers.php';
+require_once __DIR__ . '/php/settings_helpers.php';
 
-// Security headers
 header("X-Frame-Options: DENY");
 header("X-Content-Type-Options: nosniff");
 header("X-XSS-Protection: 1; mode=block");
 header("Referrer-Policy: strict-origin-when-cross-origin");
 
-// Check authentication
 if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
+    header('Location: index.php');
     exit();
 }
+
+require_no_pending_2fa();
+
+$user_id = (int)$_SESSION['user_id'];
+ensure_account_tables($conn);
+touch_user_session($conn, $user_id, session_id());
 
 // Handle template download
 if (isset($_GET['download_template'])) {
@@ -29,14 +34,55 @@ if (isset($_GET['download_template'])) {
     exit();
 }
 
-// Initialize variables
-$user_id = $_SESSION['user_id'];
-$message = '';
-$errors = [];
+$message = $_SESSION['settings_message'] ?? '';
+$errors = $_SESSION['settings_errors'] ?? [];
+unset($_SESSION['settings_message'], $_SESSION['settings_errors']);
 
-// Generate CSRF token
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// AJAX category deletion (before main POST handler)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_category_ajax'])) {
+    header('Content-Type: application/json');
+    $headers = function_exists('getallheaders') ? getallheaders() : [];
+    $ajaxToken = $headers['X-CSRF-Token'] ?? $headers['x-csrf-token'] ?? ($_POST['csrf_token'] ?? '');
+
+    if (!hash_equals($_SESSION['csrf_token'], $ajaxToken)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid CSRF token']);
+        exit;
+    }
+
+    $category_id = (int)($_POST['id'] ?? 0);
+    if ($category_id <= 0) {
+        echo json_encode(['success' => false, 'message' => 'Invalid category ID']);
+        exit;
+    }
+
+    $stmt = $conn->prepare("SELECT name FROM categories WHERE id=? AND user_id=?");
+    $stmt->bind_param("ii", $category_id, $user_id);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$row) {
+        echo json_encode(['success' => false, 'message' => 'Category not found']);
+        exit;
+    }
+
+    $uncat = 'Uncategorized';
+    $stmt = $conn->prepare("UPDATE transactions SET category=? WHERE user_id=? AND category=?");
+    $stmt->bind_param("sis", $uncat, $user_id, $row['name']);
+    $stmt->execute();
+    $stmt->close();
+
+    $stmt = $conn->prepare("DELETE FROM categories WHERE id=? AND user_id=?");
+    $stmt->bind_param("ii", $category_id, $user_id);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    echo json_encode(['success' => $ok, 'message' => $ok ? 'Category deleted.' : 'Database error']);
+    exit;
 }
 
 // Handle form submissions
@@ -67,11 +113,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 // Update password
                 $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
-                $stmt = $conn->prepare("UPDATE users SET password = ? WHERE id = ?");
+                $stmt = $conn->prepare("UPDATE users SET password = ?, password_updated_at = NOW() WHERE id = ?");
                 $stmt->bind_param("si", $hashed_password, $user_id);
                 
                 if ($stmt->execute()) {
-                    $message = "Password changed successfully!";
+                    settings_redirect('#password', 'Password changed successfully!');
                 } else {
                     $errors[] = "Failed to update password. Please try again.";
                 }
@@ -80,17 +126,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Handle theme preference
         if (isset($_POST['update_theme'])) {
-            $theme = filter_input(INPUT_POST, 'theme', FILTER_SANITIZE_STRING);
-            $allowed_themes = ['light', 'dark', 'read'];
+            $theme = $_POST['theme'] ?? 'light';
+            $allowed_themes = ['light', 'dark', 'read', 'system'];
             
-            if (in_array($theme, $allowed_themes)) {
+            if (in_array($theme, $allowed_themes, true)) {
                 $stmt = $conn->prepare("UPDATE users SET theme = ? WHERE id = ?");
                 $stmt->bind_param("si", $theme, $user_id);
                 
                 if ($stmt->execute()) {
                     $_SESSION['theme'] = $theme;
-                    $message = "Theme preference updated!";
+                    if (!empty($_POST['accent_color']) && preg_match('/^#[0-9a-fA-F]{6}$/', $_POST['accent_color'])) {
+                        $_SESSION['accent_color'] = $_POST['accent_color'];
+                    }
+                    settings_redirect('#appearance', 'Appearance settings saved!');
                 }
+            } else {
+                $errors[] = 'Invalid theme selected.';
             }
         }
         
@@ -103,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->bind_param("si", $budget_goals_json, $user_id);
             
             if ($stmt->execute()) {
-                $message = "Budget goals updated successfully!";
+                settings_redirect('#budget', 'Budget goals updated successfully!');
             } else {
                 $errors[] = "Failed to update budget goals.";
             }
@@ -111,7 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Handle categories update
         if (isset($_POST['update_categories'])) {
-            $new_category = filter_input(INPUT_POST, 'new_category', FILTER_SANITIZE_STRING);
+            $new_category = trim($_POST['new_category'] ?? '');
             
             if (!empty($new_category)) {
                 $stmt = $conn->prepare("INSERT INTO categories (user_id, name) VALUES (?, ?)");
@@ -119,7 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 try {
                     if ($stmt->execute()) {
-                        $message = "Category added successfully!";
+                        settings_redirect('#categories', 'Category added successfully!');
                     } else {
                         $errors[] = "Failed to add category. It may already exist.";
                     }
@@ -137,15 +188,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (isset($_POST['update_privacy'])) {
             $two_factor = isset($_POST['two_factor']) ? 1 : 0;
             $data_sharing = isset($_POST['data_sharing']) ? 1 : 0;
-            
-            $stmt = $conn->prepare("UPDATE users SET two_factor_enabled = ?, data_sharing = ? WHERE id = ?");
-            $stmt->bind_param("iii", $two_factor, $data_sharing, $user_id);
-            
-            if ($stmt->execute()) {
-                $message = "Privacy settings updated!";
+
+            if ($two_factor) {
+                $check = $conn->prepare("SELECT two_factor_pin_hash FROM users WHERE id = ?");
+                $check->bind_param("i", $user_id);
+                $check->execute();
+                $pinRow = $check->get_result()->fetch_assoc();
+                $check->close();
+                if (empty($pinRow['two_factor_pin_hash'])) {
+                    $errors[] = 'Enable 2FA from My Account → Security first (set your 6-digit PIN).';
+                    $two_factor = 0;
+                }
+            }
+
+            if ($two_factor) {
+                $stmt = $conn->prepare("UPDATE users SET two_factor_enabled = 1, data_sharing = ? WHERE id = ?");
+                $stmt->bind_param("ii", $data_sharing, $user_id);
             } else {
+                $stmt = $conn->prepare("UPDATE users SET two_factor_enabled = 0, two_factor_pin_hash = NULL, data_sharing = ? WHERE id = ?");
+                $stmt->bind_param("ii", $data_sharing, $user_id);
+            }
+            
+            if (empty($errors) && $stmt->execute()) {
+                settings_redirect('#privacy', 'Privacy settings updated!');
+            } elseif (empty($errors)) {
                 $errors[] = "Failed to update privacy settings.";
             }
+            $stmt->close();
         }
         
         // Handle notification settings
@@ -164,10 +233,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->bind_param("iiiii", $email_notifications, $push_notifications, $low_balance_alert, $large_expense_alert, $user_id);
             
             if ($stmt->execute()) {
-                $message = "Notification settings updated!";
+                settings_redirect('#notifications', 'Notification settings updated!');
             } else {
                 $errors[] = "Failed to update notification settings.";
             }
+            $stmt->close();
         }
         
         // Handle data export
@@ -175,8 +245,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
                 $errors[] = "Invalid CSRF token. Please try again.";
             } else {
-                $export_type = filter_input(INPUT_POST, 'export_type', FILTER_SANITIZE_STRING);
-                $allowed_types = ['excel', 'csv', 'pdf']; // Added 'pdf' to allowed types
+                $export_type = $_POST['export_type'] ?? 'csv';
+                $allowed_types = ['csv'];
                 if (in_array($export_type, $allowed_types)) {
                     // Fetch all transactions for the user
                     $stmt = $conn->prepare("SELECT * FROM transactions WHERE user_id = ? ORDER BY transaction_date DESC");
@@ -197,45 +267,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 fputcsv($output, $row);
                             }
                             fclose($output);
-                            exit();
-                        } elseif ($export_type === 'excel') {
-                            header('Content-Type: application/vnd.ms-excel');
-                            header('Content-Disposition: attachment; filename="transactions_'.date('Y-m-d').'.xls"');
-                            echo '<table border="1">';
-                            echo '<tr>';
-                            foreach (array_keys($transactions[0]) as $header) {
-                                echo '<th>'.htmlspecialchars($header).'</th>';
-                            }
-                            echo '</tr>';
-                            foreach ($transactions as $row) {
-                                echo '<tr>';
-                                foreach ($row as $cell) {
-                                    echo '<td>'.htmlspecialchars($cell).'</td>';
-                                }
-                                echo '</tr>';
-                            }
-                            echo '</table>';
-                            exit();
-                        } elseif ($export_type === 'pdf') {
-                            require_once('php/fpdf/fpdf.php'); // Make sure FPDF is installed in php/fpdf/
-                            $pdf = new FPDF();
-                            $pdf->AddPage();
-                            $pdf->SetFont('Arial','B',12);
-
-                            // Table header
-                            foreach (array_keys($transactions[0]) as $header) {
-                                $pdf->Cell(40,10,$header,1);
-                            }
-                            $pdf->Ln();
-
-                            // Table rows
-                            foreach ($transactions as $row) {
-                                foreach ($row as $cell) {
-                                    $pdf->Cell(40,10,$cell,1);
-                                }
-                                $pdf->Ln();
-                            }
-                            $pdf->Output('D', 'transactions_'.date('Y-m-d').'.pdf');
                             exit();
                         }
                     }
@@ -270,14 +301,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $data = array_combine($headers, $row);
                             
                             // Validate and sanitize data
-                            $amount = filter_var($data['amount'], FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
+                            $amount = filter_var($data['amount'], FILTER_VALIDATE_FLOAT);
                             $type = in_array(strtolower($data['type']), ['income', 'expense']) ? strtolower($data['type']) : 'expense';
                             $transaction_date = date('Y-m-d', strtotime($data['transaction_date']));
-                            $description = filter_var($data['description'], FILTER_SANITIZE_STRING);
+                            $description = htmlspecialchars(strip_tags($data['description'] ?? ''), ENT_QUOTES, 'UTF-8');
                             $category = isset($data['category']) ? trim($data['category']) : '';
                             
-                            if (!$amount || !$transaction_date || !$category) {
-                                continue; // Skip invalid rows
+                            if ($amount === false || $amount === '' || !$transaction_date || $category === '') {
+                                continue;
                             }
                             
                             // Insert transaction
@@ -292,7 +323,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                         
                         $conn->commit();
-                        $message = "Successfully imported $imported_count transactions!";
+                        settings_redirect('#data', "Successfully imported $imported_count transactions!");
                     } catch (Exception $e) {
                         $conn->rollback();
                         $errors[] = "Import failed: " . $e->getMessage();
@@ -301,109 +332,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             fclose($file);
                         }
                     }
-                } elseif (in_array($file_type, ['xls', 'xlsx'])) {
-                    try {
-                        $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($_FILES['import_file']['tmp_name']);
-                        $sheet = $spreadsheet->getActiveSheet();
-                        $rows = $sheet->toArray();
-                        $headers = array_map('strtolower', $rows[0]);
-                        $required_columns = ['amount', 'type', 'transaction_date', 'description', 'category'];
-                        $missing_columns = array_diff($required_columns, $headers);
-                        
-                        if (!empty($missing_columns)) {
-                            throw new Exception("Missing required columns: " . implode(', ', $missing_columns));
-                        }
-                        
-                        $conn->begin_transaction();
-                        $imported_count = 0;
-                        
-                        for ($i = 1; $i < count($rows); $i++) {
-                            $data = array_combine($headers, $rows[$i]);
-                            
-                            // Validate and sanitize data
-                            $amount = filter_var($data['amount'], FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
-                            $type = in_array(strtolower($data['type']), ['income', 'expense']) ? strtolower($data['type']) : 'expense';
-                            $transaction_date = date('Y-m-d', strtotime($data['transaction_date']));
-                            $description = filter_var($data['description'], FILTER_SANITIZE_STRING);
-                            $category = isset($data['category']) ? trim($data['category']) : '';
-                            
-                            if (!$amount || !$transaction_date || !$category) {
-                                continue; // Skip invalid rows
-                            }
-                            
-                            // Insert transaction
-                            $stmt = $conn->prepare("
-                                INSERT INTO transactions 
-                                (user_id, amount, type, transaction_date, description, category, created_at)
-                                VALUES (?, ?, ?, ?, ?, ?, NOW())
-                            ");
-                            $stmt->bind_param("idssss", $user_id, $amount, $type, $transaction_date, $description, $category);
-                            $stmt->execute();
-                            $imported_count++;
-                        }
-                        
-                        $conn->commit();
-                        $message = "Successfully imported $imported_count transactions!";
-                    } catch (Exception $e) {
-                        $conn->rollback();
-                        $errors[] = "Import failed: " . $e->getMessage();
-                    }
                 } else {
-                    $errors[] = "Only CSV or Excel files are supported for import.";
+                    $errors[] = "Only CSV files are supported for import.";
                 }
             } else {
                 $errors[] = "Please select a valid file to import.";
             }
         }
     }
-}
-
-// Handle AJAX category deletion
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_category_ajax'])) {
-    header('Content-Type: application/json');
-    // CSRF protection
-    $headers = getallheaders();
-    if (!isset($headers['X-CSRF-Token']) || $headers['X-CSRF-Token'] !== $_SESSION['csrf_token']) {
-        echo json_encode(['success' => false, 'message' => 'Invalid CSRF token']);
-        exit;
-    }
-    if (!isset($_SESSION['user_id'])) {
-        echo json_encode(['success' => false, 'message' => 'Not authenticated']);
-        exit;
-    }
-    $user_id = $_SESSION['user_id'];
-    $category_id = isset($_POST['id']) ? intval($_POST['id']) : 0;
-    if ($category_id > 0) {
-        // Get the category name
-        $stmt = $conn->prepare("SELECT name FROM categories WHERE id=? AND user_id=?");
-        $stmt->bind_param("ii", $category_id, $user_id);
-        $stmt->execute();
-        $stmt->bind_result($category_name);
-        $stmt->fetch();
-        $stmt->close();
-        if (!$category_name) {
-            echo json_encode(['success' => false, 'message' => 'Category not found']);
-            exit;
-        }
-        // Update all transactions to "Uncategorized"
-        $uncat = "Uncategorized";
-        $stmt = $conn->prepare("UPDATE transactions SET category=? WHERE user_id=? AND category=?");
-        $stmt->bind_param("sis", $uncat, $user_id, $category_name);
-        $stmt->execute();
-        $stmt->close();
-        // Delete the category
-        $stmt = $conn->prepare("DELETE FROM categories WHERE id=? AND user_id=?");
-        $stmt->bind_param("ii", $category_id, $user_id);
-        if ($stmt->execute()) {
-            echo json_encode(['success' => true]);
-        } else {
-            echo json_encode(['success' => false, 'message' => 'Database error']);
-        }
-        $stmt->close();
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Invalid category ID']);
-    }
-    exit;
 }
 
 // Fetch user settings with error handling
@@ -437,6 +373,7 @@ try {
     $user['push_notifications'] = $user['push_notifications'] ?? 1;
     $user['low_balance_alert'] = $user['low_balance_alert'] ?? 1;
     $user['large_expense_alert'] = $user['large_expense_alert'] ?? 1;
+    $_SESSION['theme'] = $user['theme'];
     
 } catch (mysqli_sql_exception $e) {
     error_log("Database error: " . $e->getMessage());
@@ -455,39 +392,34 @@ try {
     ];
 }
 
-// Load settings for the user
-$stmt = $conn->prepare("SELECT * FROM settings WHERE user_id = ?");
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$settings = $stmt->get_result()->fetch_assoc();
-$stmt->close();
+$settings = ensure_user_settings($conn, $user_id);
 
-// Save settings if form submitted
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_budget_settings'])) {
     if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
         $errors[] = "Invalid CSRF token. Please try again.";
     } else {
-        $monthly_budget_goal = $_POST['monthly_budget_goal'] ?? 0;
-        $monthly_savings_goal = $_POST['monthly_savings_goal'] ?? 0;
-        $weekly_spending_limit = $_POST['weekly_spending_limit'] ?? 0;
+        $monthly_budget_goal = (float)($_POST['monthly_budget_goal'] ?? 0);
+        $monthly_savings_goal = (float)($_POST['monthly_savings_goal'] ?? 0);
+        $weekly_spending_limit = (float)($_POST['weekly_spending_limit'] ?? 0);
         $budget_reset_day = $_POST['budget_reset_day'] ?? '1st of the month';
+        $allowed_reset = ['1st of the month', '15th of the month', 'Last day of the month'];
+        if (!in_array($budget_reset_day, $allowed_reset, true)) {
+            $budget_reset_day = '1st of the month';
+        }
 
         $stmt = $conn->prepare("UPDATE settings SET monthly_budget_goal=?, monthly_savings_goal=?, weekly_spending_limit=?, budget_reset_day=? WHERE user_id=?");
-        $stmt->bind_param("ddssi", $monthly_budget_goal, $monthly_savings_goal, $weekly_spending_limit, $budget_reset_day, $user_id);
+        $stmt->bind_param("dddsi", $monthly_budget_goal, $monthly_savings_goal, $weekly_spending_limit, $budget_reset_day, $user_id);
         if ($stmt->execute()) {
-            $message = "Budget settings updated successfully!";
+            settings_redirect('#budget', 'Budget settings updated successfully!');
         } else {
             $errors[] = "Failed to update budget settings.";
         }
         $stmt->close();
-        // Reload settings after update
-        $stmt = $conn->prepare("SELECT * FROM settings WHERE user_id = ?");
-        $stmt->bind_param("i", $user_id);
-        $stmt->execute();
-        $settings = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
+        $settings = ensure_user_settings($conn, $user_id);
     }
 }
+
+$accentColor = $_SESSION['accent_color'] ?? '#0d6efd';
 
 // Fetch expense categories
 $categories = [];
@@ -542,53 +474,164 @@ $default_budget_goals = [
 ?>
 
 <!DOCTYPE html>
-<html lang="en" class="<?= htmlspecialchars($user['theme']) ?>-mode">
+<html lang="en" data-theme="<?= isset($_SESSION['theme']) ? htmlspecialchars($_SESSION['theme']) : 'light' ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Settings - Student Budget Tracker</title>
+    <title><?= __('settings') ?> - <?= __('student_budget_tracker') ?></title>
     <link rel="stylesheet" href="css/style.css">
     <link href="assets/bootstrap/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="assets/bootstrap-icons/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="assets/bootstrap-icons-1.13.1/bootstrap-icons.css">
     <style>
         :root {
-            --accent-color: #0d6efd;
-        }
-        
-        /* Theme styles */
-        body.light-mode {
-            background-color: #f8f9fa;
-            color: #212529;
-            --bs-body-bg: #f8f9fa;
-        }
-        
-        body.dark-mode {
-            background-color: #212529;
-            color: #f8f9fa;
-            --bs-body-bg: #212529;
-        }
-        
-        body.read-mode {
-            background-color: #f8f6f2;
-            color: #333;
-            --bs-body-bg: #f8f6f2;
-        }
-        
-        body.dark-mode,
-        body.dark-mode .card,
-        body.dark-mode .list-group-item,
-        body.dark-mode .modal-content,
-        body.dark-mode .form-control,
-        body.dark-mode .form-select {
-            background-color: #212529 !important;
-            color: #f8f9fa !important;
-            border-color: #495057 !important;
+            --accent-color: <?= htmlspecialchars($accentColor) ?>;
         }
 
-        body.dark-mode .form-control:focus,
-        body.dark-mode .form-select:focus {
-            background-color: #212529 !important;
-            color: #f8f9fa !important;
+        /* Default light theme variables */
+        :root, [data-theme="light"], [data-theme="system"] {
+            --primary-bg-color: #f8f9fa;
+            --secondary-bg-color: #ffffff;
+            --text-color: #212529;
+            --card-bg: #ffffff;
+            --border-color: #dee2e6;
+        }
+        
+        /* Dark theme variables */
+        [data-theme="dark"] {
+            --primary-bg-color: #121212;
+            --secondary-bg-color: #1e1e1e;
+            --text-color: #e0e0e0;
+            --card-bg: #1e1e1e;
+            --border-color: #2d2d2d;
+        }
+        
+        /* Read theme variables */
+        [data-theme="read"] {
+            --primary-bg-color: #f8f5f2;
+            --secondary-bg-color: #f1e9e0;
+            --text-color: #3a3a3a;
+            --card-bg: #f1e9e0;
+            --border-color: #d9d1c7;
+        }
+
+        /* System theme media query support */
+        @media (prefers-color-scheme: dark) {
+            [data-theme="system"] {
+                --primary-bg-color: #121212;
+                --secondary-bg-color: #1e1e1e;
+                --text-color: #e0e0e0;
+                --card-bg: #1e1e1e;
+                --border-color: #2d2d2d;
+            }
+            [data-theme="system"] .navbar {
+                background-color: #1e1e1e !important;
+                border-bottom: 1px solid #2d2d2d;
+            }
+            [data-theme="system"] .card-header.bg-primary {
+                background-color: #1e1e1e !important;
+                border-bottom: 1px solid #2d2d2d !important;
+                color: #e0e0e0 !important;
+            }
+            [data-theme="system"] .btn-primary {
+                background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%) !important;
+                border-color: #4f46e5 !important;
+                color: #ffffff !important;
+                box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
+                transition: all 0.2s ease;
+            }
+            [data-theme="system"] .btn-primary:hover {
+                background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%) !important;
+                border-color: #6366f1 !important;
+                transform: translateY(-1px);
+                box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+            }
+        }
+        
+        body {
+            background-color: var(--primary-bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        
+        .card, .list-group-item, .modal-content, .table {
+            background-color: var(--card-bg) !important;
+            color: var(--text-color) !important;
+            border-color: var(--border-color) !important;
+        }
+        
+        .table th, .table td {
+            border-color: var(--border-color) !important;
+            color: var(--text-color) !important;
+        }
+        
+        .form-control, .form-select {
+            background-color: var(--secondary-bg-color) !important;
+            color: var(--text-color) !important;
+            border-color: var(--border-color) !important;
+        }
+        
+        .form-control:focus, .form-select:focus {
+            background-color: var(--secondary-bg-color) !important;
+            color: var(--text-color) !important;
+        }
+
+        /* Navbar customizations based on theme */
+        [data-theme="dark"] .navbar {
+            background-color: #1e1e1e !important;
+            border-bottom: 1px solid #2d2d2d;
+        }
+        [data-theme="read"] .navbar {
+            background-color: #e5dacb !important;
+            border-bottom: 1px solid #d9d1c7;
+        }
+        [data-theme="read"] .navbar-brand, [data-theme="read"] .nav-link {
+            color: #3a3a3a !important;
+        }
+        [data-theme="read"] .nav-link i {
+            color: #3a3a3a !important;
+        }
+
+        /* Override bg-primary for card headers in dark and read themes */
+        [data-theme="dark"] .card-header.bg-primary {
+            background-color: #1e1e1e !important;
+            border-bottom: 1px solid #2d2d2d !important;
+            color: #e0e0e0 !important;
+        }
+        [data-theme="read"] .card-header.bg-primary {
+            background-color: #f1e9e0 !important;
+            border-bottom: 1px solid #d9d1c7 !important;
+            color: #3a3a3a !important;
+        }
+        [data-theme="read"] .card-header.bg-primary h5 {
+            color: #3a3a3a !important;
+        }
+
+        /* Override primary button in dark theme */
+        [data-theme="dark"] .btn-primary {
+            background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%) !important;
+            border-color: #4f46e5 !important;
+            color: #ffffff !important;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
+            transition: all 0.2s ease;
+        }
+        [data-theme="dark"] .btn-primary:hover {
+            background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%) !important;
+            border-color: #6366f1 !important;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+        }
+
+        /* Override primary button in read theme */
+        [data-theme="read"] .btn-primary {
+            background-color: #5c544c !important;
+            border-color: #5c544c !important;
+            color: #ffffff !important;
+            transition: all 0.2s ease;
+        }
+        [data-theme="read"] .btn-primary:hover {
+            background-color: #4a433d !important;
+            border-color: #4a433d !important;
+            transform: translateY(-1px);
         }
         
         .password-meter {
@@ -676,43 +719,34 @@ $default_budget_goals = [
             margin-top: 5px;
             font-size: 0.875em;
         }
+
+        .btn-check:checked + label {
+            outline: 2px solid var(--accent-color) !important;
+            outline-offset: 2px;
+        }
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-        <div class="container">
-            <a class="navbar-brand" href="dashboard.php">Student Budget Tracker</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
+    <nav class="navbar navbar-expand navbar-dark bg-primary">
+        <div class="container-fluid px-3">
+            <a class="navbar-brand" href="dashboard.php"><?= __('student_budget_tracker') ?></a>
             <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="dashboard.php">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="add_income.php">Add Income</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="add_expense.php">Add Expense</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="report.php">Reports</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="history.php">History</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link active" href="settings.php">Settings</a>
-                    </li>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="accountDropdown" role="button" data-bs-toggle="dropdown">
-                            <i class="bi bi-person-circle"></i>
+                <ul class="navbar-nav ms-auto align-items-center" style="font-size: 0.8rem;">
+                    <li class="nav-item"><a class="nav-link <?= basename($_SERVER['PHP_SELF']) == 'dashboard.php' ? 'active' : '' ?>" href="dashboard.php"><i class="bi bi-speedometer2 me-1"></i> <?= __('dashboard') ?></a></li>
+                    <li class="nav-item"><a class="nav-link <?= basename($_SERVER['PHP_SELF']) == 'add_income.php' ? 'active' : '' ?>" href="add_income.php"><i class="bi bi-plus-circle me-1"></i> <?= __('add_income') ?></a></li>
+                    <li class="nav-item"><a class="nav-link <?= basename($_SERVER['PHP_SELF']) == 'add_expense.php' ? 'active' : '' ?>" href="add_expense.php"><i class="bi bi-dash-circle me-1"></i> <?= __('add_expense') ?></a></li>
+                    <li class="nav-item"><a class="nav-link <?= basename($_SERVER['PHP_SELF']) == 'history.php' ? 'active' : '' ?>" href="history.php"><i class="bi bi-clock-history me-1"></i> <?= __('history') ?></a></li>
+                    <li class="nav-item"><a class="nav-link <?= basename($_SERVER['PHP_SELF']) == 'report.php' ? 'active' : '' ?>" href="report.php"><i class="bi bi-bar-chart-line me-1"></i> <?= __('reports') ?></a></li>
+                    <li class="nav-item dropdown ms-2">
+                        <a class="nav-link d-flex align-items-center" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false" style="padding-right: 0;">
+                            <span class="me-2 text-white" style="font-size: 0.85rem; font-weight: 500;"><?= htmlspecialchars(__($_SESSION['user_name'] ?? 'User')) ?></span>
+                            <i class="bi bi-list fs-5" style="color: rgba(255,255,255,0.85);"></i>
                         </a>
-                        <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="account.php">My Account</a></li>
+                        <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="navbarDropdown" style="font-size: 0.8rem;">
+                            <li><a class="dropdown-item <?= basename($_SERVER['PHP_SELF']) == 'account.php' ? 'active' : '' ?>" href="account.php"><i class="bi bi-person me-2"></i> <?= __('my_account') ?></a></li>
+                            <li><a class="dropdown-item <?= basename($_SERVER['PHP_SELF']) == 'settings.php' ? 'active' : '' ?>" href="settings.php"><i class="bi bi-gear me-2"></i> <?= __('settings') ?></a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="logout.php">Logout</a></li>
+                            <li><a class="dropdown-item text-danger" href="logout.php"><i class="bi bi-box-arrow-right me-2"></i> <?= __('logout') ?></a></li>
                         </ul>
                     </li>
                 </ul>
@@ -740,32 +774,32 @@ $default_budget_goals = [
             <div class="col-md-3 mb-4">
                 <div class="card shadow">
                     <div class="card-header bg-primary text-white">
-                        <h5 class="mb-0">Settings Menu</h5>
+                        <h5 class="mb-0"><?= __('settings_menu') ?></h5>
                     </div>
                     <div class="list-group list-group-flush settings-menu" id="settingsMenu">
                         <a href="#password" class="list-group-item list-group-item-action active" data-bs-toggle="tab">
-                            <i class="bi bi-shield-lock me-2"></i>Password
+                            <i class="bi bi-shield-lock me-2"></i><?= __('password') ?>
                         </a>
                         <a href="#notifications" class="list-group-item list-group-item-action" data-bs-toggle="tab">
-                            <i class="bi bi-bell me-2"></i>Notifications
+                            <i class="bi bi-bell me-2"></i><?= __('notifications') ?>
                         </a>
                         <a href="#budget" class="list-group-item list-group-item-action" data-bs-toggle="tab">
-                            <i class="bi bi-graph-up me-2"></i>Budget Goals
+                            <i class="bi bi-graph-up me-2"></i><?= __('budget_goals') ?>
                         </a>
                         <a href="#appearance" class="list-group-item list-group-item-action" data-bs-toggle="tab">
-                            <i class="bi bi-palette me-2"></i>Appearance
+                            <i class="bi bi-palette me-2"></i><?= __('appearance') ?>
                         </a>
                         <a href="#categories" class="list-group-item list-group-item-action" data-bs-toggle="tab">
-                            <i class="bi bi-tags me-2"></i>Categories
+                            <i class="bi bi-tags me-2"></i><?= __('categories') ?>
                         </a>
                         <a href="#data" class="list-group-item list-group-item-action" data-bs-toggle="tab">
-                            <i class="bi bi-database me-2"></i>Data Management
+                            <i class="bi bi-database me-2"></i><?= __('data_management') ?>
                         </a>
                         <a href="#privacy" class="list-group-item list-group-item-action" data-bs-toggle="tab">
-                            <i class="bi bi-lock me-2"></i>Privacy & Security
+                            <i class="bi bi-lock me-2"></i><?= __('privacy_security') ?>
                         </a>
                         <a href="logout.php" class="list-group-item list-group-item-action text-danger">
-                            <i class="bi bi-box-arrow-right me-2"></i>Logout
+                            <i class="bi bi-box-arrow-right me-2"></i><?= __('logout') ?>
                         </a>
                     </div>
                 </div>
@@ -775,7 +809,7 @@ $default_budget_goals = [
             <div class="col-md-9">
                 <div class="card shadow">
                     <div class="card-header bg-primary text-white">
-                        <h4 class="mb-0">Account Settings</h4>
+                        <h4 class="mb-0"><?= __('account_settings') ?></h4>
                     </div>
                     <div class="card-body">
                         <div class="tab-content" id="settingsTabContent">
@@ -784,20 +818,20 @@ $default_budget_goals = [
                                 <form id="passwordForm" method="post">
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                                     <div class="mb-3">
-                                        <label for="currentPassword" class="form-label">Current Password</label>
+                                        <label for="currentPassword" class="form-label"><?= __('current_password') ?></label>
                                         <input type="password" class="form-control" id="currentPassword" name="current_password" required>
                                     </div>
                                     <div class="mb-3">
-                                        <label for="newPassword" class="form-label">New Password</label>
+                                        <label for="newPassword" class="form-label"><?= __('new_password') ?></label>
                                         <input type="password" class="form-control" id="newPassword" name="new_password" required>
-                                        <div class="form-text">Password must be at least 8 characters long</div>
+                                        <div class="form-text"><?= __('password_length_hint') ?></div>
                                     </div>
                                     <div class="mb-3">
-                                        <label for="confirmNewPassword" class="form-label">Confirm New Password</label>
+                                        <label for="confirmNewPassword" class="form-label"><?= __('confirm_new_password') ?></label>
                                         <input type="password" class="form-control" id="confirmNewPassword" name="confirm_password" required>
                                     </div>
                                     <div class="d-grid gap-2">
-                                        <button type="submit" name="change_password" class="btn btn-primary">Change Password</button>
+                                        <button type="submit" name="change_password" class="btn btn-primary"><?= __('change_password') ?></button>
                                     </div>
                                 </form>
                             </div>
@@ -806,23 +840,23 @@ $default_budget_goals = [
                             <div class="tab-pane fade" id="notifications" role="tabpanel">
                                 <form id="notificationsForm" method="post">
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
-                                    <h4 class="mb-4">Notification Settings</h4>
+                                    <h4 class="mb-4"><?= __('notification_settings') ?></h4>
                                     
                                     <div class="card mb-4">
                                         <div class="card-body">
-                                            <h5 class="card-title">Notification Methods</h5>
+                                            <h5 class="card-title"><?= __('notification_methods') ?></h5>
                                             <div class="form-check form-switch mb-3">
                                                 <input class="form-check-input" type="checkbox" id="emailNotifications" 
                                                        name="email_notifications" <?= $user['email_notifications'] ? 'checked' : '' ?>>
                                                 <label class="form-check-label" for="emailNotifications">
-                                                    Email Notifications
+                                                    <?= __('email_notifications') ?>
                                                 </label>
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input class="form-check-input" type="checkbox" id="pushNotifications" 
                                                        name="push_notifications" <?= $user['push_notifications'] ? 'checked' : '' ?>>
                                                 <label class="form-check-label" for="pushNotifications">
-                                                    Push Notifications
+                                                    <?= __('push_notifications') ?>
                                                 </label>
                                             </div>
                                         </div>
@@ -830,37 +864,37 @@ $default_budget_goals = [
                                     
                                     <div class="card mb-4">
                                         <div class="card-body">
-                                            <h5 class="card-title">Alert Preferences</h5>
+                                            <h5 class="card-title"><?= __('alert_preferences') ?></h5>
                                             <div class="form-check form-switch mb-3">
                                                 <input class="form-check-input" type="checkbox" id="lowBalanceAlert" 
                                                        name="low_balance_alert" <?= $user['low_balance_alert'] ? 'checked' : '' ?>>
                                                 <label class="form-check-label" for="lowBalanceAlert">
-                                                    Low Balance Alerts
+                                                    <?= __('low_balance_alerts') ?>
                                                 </label>
-                                                <div class="form-text">Receive alerts when your balance falls below a threshold</div>
+                                                <div class="form-text"><?= __('low_balance_alerts_desc') ?></div>
                                             </div>
                                             <div class="form-check form-switch">
                                                 <input class="form-check-input" type="checkbox" id="largeExpenseAlert" 
                                                        name="large_expense_alert" <?= $user['large_expense_alert'] ? 'checked' : '' ?>>
                                                 <label class="form-check-label" for="largeExpenseAlert">
-                                                    Large Expense Alerts
+                                                    <?= __('large_expense_alerts') ?>
                                                 </label>
-                                                <div class="form-text">Receive alerts for unusually large expenses</div>
+                                                <div class="form-text"><?= __('large_expense_alerts_desc') ?></div>
                                             </div>
                                         </div>
                                     </div>
                                     
                                     <div class="d-grid gap-2">
-                                        <button type="submit" name="update_notifications" class="btn btn-primary">Save Notification Settings</button>
+                                        <button type="submit" name="update_notifications" class="btn btn-primary"><?= __('save_notification_settings') ?></button>
                                     </div>
                                 </form>
                             </div>
                             
                             <!-- Budget Goals Tab -->
-                            <div class="tab-pane fade show active" id="budget" role="tabpanel">
+                            <div class="tab-pane fade" id="budget" role="tabpanel">
                                 <div class="card">
                                     <div class="card-header bg-primary text-white">
-                                        <h4 class="mb-0">Account Settings</h4>
+                                        <h4 class="mb-0"><?= __('budget_goals') ?></h4>
                                     </div>
                                     <div class="card-body">
                                         <?php if (!empty($errors)): ?>
@@ -878,29 +912,29 @@ $default_budget_goals = [
                                         <form method="post" action="settings.php#budget">
                                             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                                             <div class="mb-3">
-                                                <label for="monthly_budget_goal" class="form-label">Monthly Budget Goal (₹)</label>
+                                                <label for="monthly_budget_goal" class="form-label"><?= __('monthly_budget_goal') ?> (₹)</label>
                                                 <input type="number" class="form-control" id="monthly_budget_goal" name="monthly_budget_goal"
                                                     value="<?= htmlspecialchars($settings['monthly_budget_goal'] ?? '') ?>" min="0" step="0.01">
                                             </div>
                                             <div class="mb-3">
-                                                <label for="monthly_savings_goal" class="form-label">Monthly Savings Goal (₹)</label>
+                                                <label for="monthly_savings_goal" class="form-label"><?= __('monthly_savings_goal') ?> (₹)</label>
                                                 <input type="number" class="form-control" id="monthly_savings_goal" name="monthly_savings_goal"
                                                     value="<?= htmlspecialchars($settings['monthly_savings_goal'] ?? '') ?>" min="0" step="0.01">
                                             </div>
                                             <div class="mb-3">
-                                                <label for="weekly_spending_limit" class="form-label">Weekly Spending Limit (₹)</label>
+                                                <label for="weekly_spending_limit" class="form-label"><?= __('weekly_spending_limit') ?> (₹)</label>
                                                 <input type="number" class="form-control" id="weekly_spending_limit" name="weekly_spending_limit"
                                                     value="<?= htmlspecialchars($settings['weekly_spending_limit'] ?? '') ?>" min="0" step="0.01">
                                             </div>
                                             <div class="mb-3">
-                                                <label for="budget_reset_day" class="form-label">Budget Reset Day</label>
+                                                <label for="budget_reset_day" class="form-label"><?= __('budget_reset_day') ?></label>
                                                 <select class="form-select" id="budget_reset_day" name="budget_reset_day">
-                                                    <option value="1st of the month" <?= ($settings['budget_reset_day'] ?? '') == '1st of the month' ? 'selected' : '' ?>>1st of the month</option>
-                                                    <option value="15th of the month" <?= ($settings['budget_reset_day'] ?? '') == '15th of the month' ? 'selected' : '' ?>>15th of the month</option>
-                                                    <option value="Last day of the month" <?= ($settings['budget_reset_day'] ?? '') == 'Last day of the month' ? 'selected' : '' ?>>Last day of the month</option>
+                                                    <option value="1st of the month" <?= ($settings['budget_reset_day'] ?? '') == '1st of the month' ? 'selected' : '' ?>><?= __('first_of_month') ?></option>
+                                                    <option value="15th of the month" <?= ($settings['budget_reset_day'] ?? '') == '15th of the month' ? 'selected' : '' ?>><?= __('fifteenth_of_month') ?></option>
+                                                    <option value="Last day of the month" <?= ($settings['budget_reset_day'] ?? '') == 'Last day of the month' ? 'selected' : '' ?>><?= __('last_day_of_month') ?></option>
                                                 </select>
                                             </div>
-                                            <button type="submit" name="save_budget_settings" class="btn btn-primary w-100">Save Budget Settings</button>
+                                            <button type="submit" name="save_budget_settings" class="btn btn-primary w-100"><?= __('save_budget_settings') ?></button>
                                         </form>
                                     </div>
                                 </div>
@@ -911,7 +945,7 @@ $default_budget_goals = [
                                 <form id="appearanceForm" method="post">
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                                     <div class="mb-4">
-                                        <h5 class="mb-3">Theme Settings</h5>
+                                        <h5 class="mb-3"><?= __('theme_settings') ?></h5>
                                         <div class="row g-3">
                                             <div class="col-md-4">
                                                 <label class="theme-card">
@@ -921,8 +955,8 @@ $default_budget_goals = [
                                                             <div class="mb-3">
                                                                 <i class="bi bi-sun fs-1"></i>
                                                             </div>
-                                                            <h5>Light Mode</h5>
-                                                            <p class="text-muted">Bright and clear interface</p>
+                                                            <h5><?= __('light_mode') ?></h5>
+                                                            <p class="text-muted"><?= __('bright_clear_interface') ?></p>
                                                         </div>
                                                     </div>
                                                 </label>
@@ -935,8 +969,8 @@ $default_budget_goals = [
                                                             <div class="mb-3">
                                                                 <i class="bi bi-moon fs-1"></i>
                                                             </div>
-                                                            <h5>Dark Mode</h5>
-                                                            <p class="text-muted">Easy on the eyes in low light</p>
+                                                            <h5><?= __('dark_mode') ?></h5>
+                                                            <p class="text-muted"><?= __('easy_on_eyes') ?></p>
                                                         </div>
                                                     </div>
                                                 </label>
@@ -949,8 +983,8 @@ $default_budget_goals = [
                                                             <div class="mb-3">
                                                                 <i class="bi bi-book fs-1"></i>
                                                             </div>
-                                                            <h5>Read Mode</h5>
-                                                            <p class="text-muted">Reduced eye strain for reading</p>
+                                                            <h5><?= __('read_mode') ?></h5>
+                                                            <p class="text-muted"><?= __('reduced_eye_strain') ?></p>
                                                         </div>
                                                     </div>
                                                 </label>
@@ -958,36 +992,32 @@ $default_budget_goals = [
                                         </div>
                                     </div>
                                     
-                                    <h5 class="mb-3">Accent Color</h5>
+                                    <h5 class="mb-3"><?= __('accent_color') ?></h5>
                                     <div class="row mb-4">
                                         <div class="col-12">
                                             <div class="d-flex flex-wrap gap-2">
-                                                <input type="radio" class="btn-check" name="accent_color" id="colorBlue" value="#0d6efd" checked>
-                                                <label class="btn btn-sm" style="background-color: #0d6efd;" for="colorBlue"></label>
-                                                
-                                                <input type="radio" class="btn-check" name="accent_color" id="colorPurple" value="#6f42c1">
-                                                <label class="btn btn-sm" style="background-color: #6f42c1;" for="colorPurple"></label>
-                                                
-                                                <input type="radio" class="btn-check" name="accent_color" id="colorPink" value="#d63384">
-                                                <label class="btn btn-sm" style="background-color: #d63384;" for="colorPink"></label>
-                                                
-                                                <input type="radio" class="btn-check" name="accent_color" id="colorRed" value="#dc3545">
-                                                <label class="btn btn-sm" style="background-color: #dc3545;" for="colorRed"></label>
-                                                
-                                                <input type="radio" class="btn-check" name="accent_color" id="colorOrange" value="#fd7e14">
-                                                <label class="btn btn-sm" style="background-color: #fd7e14;" for="colorOrange"></label>
-                                                
-                                                <input type="radio" class="btn-check" name="accent_color" id="colorGreen" value="#198754">
-                                                <label class="btn btn-sm" style="background-color: #198754;" for="colorGreen"></label>
-                                                
-                                                <input type="radio" class="btn-check" name="accent_color" id="colorTeal" value="#20c997">
-                                                <label class="btn btn-sm" style="background-color: #20c997;" for="colorTeal"></label>
+                                                <?php
+                                                $accentOptions = [
+                                                    'colorBlue'   => '#0d6efd',
+                                                    'colorPurple' => '#6f42c1',
+                                                    'colorPink'   => '#d63384',
+                                                    'colorRed'    => '#dc3545',
+                                                    'colorOrange' => '#fd7e14',
+                                                    'colorGreen'  => '#198754',
+                                                    'colorTeal'   => '#20c997',
+                                                ];
+                                                foreach ($accentOptions as $id => $color):
+                                                    $checked = $accentColor === $color ? 'checked' : '';
+                                                ?>
+                                                <input type="radio" class="btn-check" name="accent_color" id="<?= $id ?>" value="<?= $color ?>" <?= $checked ?>>
+                                                <label class="btn btn-sm" for="<?= $id ?>" style="background-color:<?= $color ?>;width:2rem;height:2rem;border-radius:50%;padding:0;border:3px solid transparent;outline:2px solid transparent;"></label>
+                                                <?php endforeach; ?>
                                             </div>
                                         </div>
                                     </div>
                                     
                                     <div class="d-grid gap-2">
-                                        <button type="submit" name="update_theme" class="btn btn-primary">Save Appearance Settings</button>
+                                        <button type="submit" name="update_theme" class="btn btn-primary"><?= __('save_appearance_settings') ?></button>
                                     </div>
                                 </form>
                             </div>
@@ -998,20 +1028,20 @@ $default_budget_goals = [
                                     <div class="col-md-6">
                                         <form id="categoriesForm" method="post">
                                             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
-                                            <h4 class="mb-4">Manage Categories</h4>
+                                            <h4 class="mb-4"><?= __('manage_categories') ?></h4>
                                             
                                             <div class="mb-3">
-                                                <label for="newCategory" class="form-label">Add New Category</label>
+                                                <label for="newCategory" class="form-label"><?= __('add_new_category') ?></label>
                                                 <div class="input-group">
-                                                    <input type="text" class="form-control" id="newCategory" name="new_category" placeholder="Category name">
-                                                    <button class="btn btn-primary" type="submit" name="update_categories">Add</button>
+                                                    <input type="text" class="form-control" id="newCategory" name="new_category" placeholder="<?= __('category_name') ?>">
+                                                    <button class="btn btn-primary" type="submit" name="update_categories"><?= __('add') ?></button>
                                                 </div>
                                             </div>
                                         </form>
                                     </div>
                                     
                                     <div class="col-md-6">
-                                        <h5 class="mb-3">Your Categories</h5>
+                                        <h5 class="mb-3"><?= __('your_categories') ?></h5>
                                         <?php if (!empty($categories)): ?>
                                             <div class="list-group">
                                                 <?php foreach ($categories as $id => $name): ?>
@@ -1026,9 +1056,9 @@ $default_budget_goals = [
                                         <?php else: ?>
                                             <div class="alert alert-info text-center fade show">
                                                 <i class="bi bi-tags display-4 mb-2 text-secondary"></i>
-                                                <div class="mb-2">You haven't created any categories yet.</div>
+                                                <div class="mb-2"><?= __('no_categories_yet') ?></div>
                                                 <button class="btn btn-primary btn-sm" onclick="document.getElementById('newCategory').focus();">
-                                                    <i class="bi bi-plus-circle"></i> Add Your First Category
+                                                    <i class="bi bi-plus-circle"></i> <?= __('add_first_category') ?>
                                                 </button>
                                             </div>
                                         <?php endif; ?>
@@ -1038,44 +1068,18 @@ $default_budget_goals = [
                             
                             <!-- Data Management Tab -->
                             <div class="tab-pane fade" id="data" role="tabpanel">
-                                <h4 class="mb-4">Data Management</h4>
+                                <h4 class="mb-4"><?= __('data_management') ?></h4>
                                 
                                 <div class="mb-4">
-                                    <h5>Export Data</h5>
-                                    <p>Download your financial data for backup or analysis.</p>
+                                    <h5><?= __('export_data') ?></h5>
+                                    <p><?= __('export_data_desc') ?></p>
                                     
                                     <form id="exportForm" method="post" action="settings.php#data">
                                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+                                        <input type="hidden" name="export_type" value="csv">
                                         
-                                        <div class="export-option mb-3">
-                                            <div class="form-check">
-                                                <input class="form-check-input" type="radio" name="export_type" id="exportExcel" value="excel" checked>
-                                                <label class="form-check-label" for="exportExcel">
-                                                    Export to Excel (.xls)
-                                                </label>
-                                            </div>
-                                        </div>
-                                        
-                                        <div class="export-option mb-3">
-                                            <div class="form-check">
-                                                <input class="form-check-input" type="radio" name="export_type" id="exportCSV" value="csv">
-                                                <label class="form-check-label" for="exportCSV">
-                                                    Export to CSV (.csv)
-                                                </label>
-                                            </div>
-                                        </div>
-                                        
-                                        <div class="export-option mb-3">
-                                            <div class="form-check">
-                                                <input class="form-check-input" type="radio" name="export_type" id="exportPDF" value="pdf">
-                                                <label class="form-check-label" for="exportPDF">
-                                                    Export to PDF (.pdf)
-                                                </label>
-                                            </div>
-                                        </div>
-                                        
-                                        <button type="submit" name="export_data" class="btn btn-primary mt-3">
-                                            <i class="bi bi-download me-2"></i>Export Data
+                                        <button type="submit" name="export_data" class="btn btn-primary">
+                                            <i class="bi bi-download me-2"></i><?= __('export_data') ?>
                                         </button>
                                     </form>
                                     <?php if (!empty($errors) && isset($_POST['export_data'])): ?>
@@ -1088,41 +1092,41 @@ $default_budget_goals = [
                                 </div>
                                 
                                 <div class="mb-4">
-                                    <h5>Import Data</h5>
-                                    <p>Import transactions from other systems. (CSV or Excel format only)</p>
+                                    <h5><?= __('import_data') ?></h5>
+                                    <p><?= __('import_data_desc') ?></p>
                                     
                                     <form id="importForm" method="post" enctype="multipart/form-data">
                                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                                         
                                         <div class="mb-3">
-                                            <label for="importFile" class="form-label">Select CSV or Excel file to import</label>
+                                            <label for="importFile" class="form-label"><?= __('select_csv_file') ?></label>
                                             <div class="input-group">
-                                                <input type="file" class="form-control" id="importFile" name="import_file" accept=".csv,.xls,.xlsx" required>
+                                                <input type="file" class="form-control" id="importFile" name="import_file" accept=".csv" required>
                                             </div>
-                                            <div class="file-input-info" id="fileInfo">No file chosen</div>
+                                            <div class="file-input-info" id="fileInfo"><?= __('no_file_chosen') ?></div>
                                             <div class="form-text">
-                                                File must be in CSV or Excel format with these columns: amount, type (income/expense), date, description
+                                                <?= __('import_file_format_desc') ?>
                                             </div>
                                         </div>
                                         
                                         <button type="submit" name="import_data" class="btn btn-primary">
-                                            <i class="bi bi-upload me-2"></i>Import Data
+                                            <i class="bi bi-upload me-2"></i><?= __('import_data') ?>
                                         </button>
                                     </form>
                                     
                                     <div class="mt-3">
                                         <a href="?download_template=1" class="text-decoration-none">
-                                            <i class="bi bi-file-earmark-arrow-down me-1"></i>Download CSV template
+                                            <i class="bi bi-file-earmark-arrow-down me-1"></i><?= __('download_csv_template') ?>
                                         </a>
                                     </div>
                                 </div>
                                 
                                 <div class="danger-zone">
-                                    <h4>Danger Zone</h4>
-                                    <p>These actions cannot be undone. Proceed with caution.</p>
+                                    <h4><?= __('danger_zone') ?></h4>
+                                    <p><?= __('danger_zone_desc') ?></p>
                                     
                                     <button class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
-                                        <i class="bi bi-trash me-2"></i>Delete All Data
+                                        <i class="bi bi-trash me-2"></i><?= __('delete_all_data') ?>
                                     </button>
                                 </div>
                             </div>
@@ -1131,17 +1135,17 @@ $default_budget_goals = [
                             <div class="tab-pane fade" id="privacy" role="tabpanel">
                                 <form id="privacyForm" method="post">
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
-                                    <h4 class="mb-4">Privacy & Security Settings</h4>
+                                    <h4 class="mb-4"><?= __('privacy_security') ?></h4>
                                     
                                     <div class="card mb-4">
                                         <div class="card-body">
-                                            <h5 class="card-title">Two-Factor Authentication</h5>
-                                            <p class="card-text">Add an extra layer of security to your account.</p>
+                                            <h5 class="card-title"><?= __('two_factor_auth') ?></h5>
+                                            <p class="card-text"><?= __('two_factor_desc') ?></p>
                                             <div class="form-check form-switch">
                                                 <input class="form-check-input" type="checkbox" id="twoFactorEnabled" 
                                                        name="two_factor" <?= $user['two_factor_enabled'] ? 'checked' : '' ?>>
                                                 <label class="form-check-label" for="twoFactorEnabled">
-                                                    Enable Two-Factor Authentication
+                                                    <?= __('enable_2fa') ?>
                                                 </label>
                                             </div>
                                         </div>
@@ -1149,13 +1153,13 @@ $default_budget_goals = [
                                     
                                     <div class="card mb-4">
                                         <div class="card-body">
-                                            <h5 class="card-title">Data Sharing</h5>
-                                            <p class="card-text">Help improve our service by sharing anonymous usage data.</p>
+                                            <h5 class="card-title"><?= __('data_sharing') ?></h5>
+                                            <p class="card-text"><?= __('data_sharing_desc') ?></p>
                                             <div class="form-check form-switch">
                                                 <input class="form-check-input" type="checkbox" id="dataSharing" 
                                                        name="data_sharing" <?= $user['data_sharing'] ? 'checked' : '' ?>>
                                                 <label class="form-check-label" for="dataSharing">
-                                                    Allow Anonymous Data Sharing
+                                                    <?= __('allow_data_sharing') ?>
                                                 </label>
                                             </div>
                                         </div>
@@ -1163,25 +1167,17 @@ $default_budget_goals = [
                                     
                                     <div class="card">
                                         <div class="card-body">
-                                            <h5 class="card-title">Active Sessions</h5>
-                                            <p class="card-text">View and manage your active login sessions.</p>
-                                            <div class="list-group">
-                                                <div class="list-group-item">
-                                                    <div class="d-flex justify-content-between">
-                                                        <div>
-                                                            <strong>Current Session</strong>
-                                                            <div class="text-muted"><?= htmlspecialchars($_SERVER['HTTP_USER_AGENT']) ?></div>
-                                                            <small class="text-muted"><?= date('Y-m-d H:i:s') ?></small>
-                                                        </div>
-                                                        <span class="badge bg-primary">Active</span>
-                                                    </div>
-                                                </div>
+                                            <h5 class="card-title"><?= __('active_sessions') ?></h5>
+                                            <p class="card-text"><?= __('active_sessions_desc') ?></p>
+                                            <div class="list-group" id="privacySessionsList">
+                                                <div class="list-group-item text-muted">Loading sessions...</div>
                                             </div>
+                                            <a href="account.php#security" class="btn btn-sm btn-outline-primary mt-2">Manage in My Account</a>
                                         </div>
                                     </div>
                                     
                                     <div class="d-grid gap-2 mt-4">
-                                        <button type="submit" name="update_privacy" class="btn btn-primary">Save Privacy Settings</button>
+                                        <button type="submit" name="update_privacy" class="btn btn-primary"><?= __('save_privacy_settings') ?></button>
                                     </div>
                                 </form>
                             </div>
@@ -1197,19 +1193,19 @@ $default_budget_goals = [
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header bg-danger text-white">
-                    <h5 class="modal-title">Confirm Deletion</h5>
+                    <h5 class="modal-title"><?= __('confirm_deletion') ?></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p>Are you sure you want to delete all your financial data? This action cannot be undone.</p>
+                    <p><?= __('delete_all_data_confirm_text') ?></p>
                     <div class="form-check mb-3">
                         <input class="form-check-input" type="checkbox" id="confirmDelete">
-                        <label class="form-check-label" for="confirmDelete">I understand this will permanently delete all my data</label>
+                        <label class="form-check-label" for="confirmDelete"><?= __('delete_all_data_understand') ?></label>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-danger" id="deleteDataBtn" disabled>Delete All Data</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= __('cancel') ?></button>
+                    <button type="button" class="btn btn-danger" id="deleteDataBtn" disabled><?= __('delete_all_data') ?></button>
                 </div>
             </div>
         </div>
@@ -1220,15 +1216,15 @@ $default_budget_goals = [
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header bg-danger text-white">
-                    <h5 class="modal-title">Confirm Category Deletion</h5>
+                    <h5 class="modal-title"><?= __('confirm_category_deletion') ?></h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p>Are you sure you want to delete this category? All expenses in this category will be moved to "Uncategorized".</p>
+                    <p><?= __('delete_category_confirm_text') ?></p>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-danger" id="confirmDeleteCategory">Delete Category</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= __('cancel') ?></button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteCategory"><?= __('delete_transaction') ?></button>
                 </div>
             </div>
         </div>
@@ -1236,31 +1232,39 @@ $default_budget_goals = [
 
     <script src="assets/bootstrap/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Initialize tab functionality
+        const CSRF_TOKEN = <?= json_encode($_SESSION['csrf_token']) ?>;
+
         document.addEventListener('DOMContentLoaded', function() {
-            // Initialize Bootstrap tabs
-            const tabLinks = document.querySelectorAll('#settingsMenu a[data-bs-toggle="tab"]');
-            tabLinks.forEach(link => {
+            function activateTab(hash) {
+                if (!hash || !hash.startsWith('#')) return;
+                const link = document.querySelector(`#settingsMenu a[href="${hash}"]`);
+                const tabPane = document.querySelector(hash);
+                if (!link || !tabPane) return;
+
+                document.querySelectorAll('#settingsMenu .list-group-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                link.classList.add('active');
+
+                document.querySelectorAll('.tab-pane').forEach(pane => {
+                    pane.classList.remove('show', 'active');
+                });
+                tabPane.classList.add('show', 'active');
+
+                if (hash === '#privacy') {
+                    loadPrivacySessions();
+                }
+            }
+
+            document.querySelectorAll('#settingsMenu a[data-bs-toggle="tab"]').forEach(link => {
                 link.addEventListener('click', function(e) {
                     e.preventDefault();
-                    const target = this.getAttribute('href');
-                    const tabPane = document.querySelector(target);
-                    
-                    // Remove active class from all tabs
-                    document.querySelectorAll('#settingsMenu .list-group-item').forEach(item => {
-                        item.classList.remove('active');
-                    });
-                    
-                    // Add active class to current tab
-                    this.classList.add('active');
-                    
-                    // Show the target tab pane
-                    document.querySelectorAll('.tab-pane').forEach(pane => {
-                        pane.classList.remove('show', 'active');
-                    });
-                    tabPane.classList.add('show', 'active');
+                    activateTab(this.getAttribute('href'));
+                    history.replaceState(null, '', this.getAttribute('href'));
                 });
             });
+
+            activateTab(window.location.hash || '#password');
 
             // Password strength meter
             document.getElementById('newPassword').addEventListener('input', function() {
@@ -1323,29 +1327,30 @@ $default_budget_goals = [
                     document.getElementById('deleteDataBtn').disabled = !this.checked;
                 });
                 
-                document.getElementById('deleteDataBtn').addEventListener('click', function() {
-                    if (confirm('Are you absolutely sure? This cannot be undone!')) {
-                        fetch('delete_data.php', {
+                document.getElementById('deleteDataBtn').addEventListener('click', async function() {
+                    const btn = this;
+                    btn.disabled = true;
+                    try {
+                        const response = await fetch('delete_data.php', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
-                                'X-CSRF-Token': '<?= $_SESSION['csrf_token'] ?>'
+                                'X-CSRF-Token': CSRF_TOKEN
                             },
                             body: JSON.stringify({ confirm: true })
-                        })
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.success) {
-                                alert('All your data has been deleted successfully.');
-                                window.location.reload();
-                            } else {
-                                alert('Failed to delete data: ' + data.message);
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Error:', error);
-                            alert('An error occurred while deleting data.');
                         });
+                        const data = await response.json();
+                        if (data.success) {
+                            bootstrap.Modal.getInstance(document.getElementById('deleteModal')).hide();
+                            alert(data.message || 'All data deleted.');
+                            window.location.href = 'settings.php#data';
+                        } else {
+                            alert(data.message || 'Failed to delete data.');
+                            btn.disabled = false;
+                        }
+                    } catch (error) {
+                        alert('An error occurred while deleting data.');
+                        btn.disabled = false;
                     }
                 });
             }
@@ -1357,30 +1362,31 @@ $default_budget_goals = [
                     const categoryId = this.getAttribute('data-id');
                     const modal = new bootstrap.Modal(document.getElementById('deleteCategoryModal'));
                     
-                    document.getElementById('confirmDeleteCategory').onclick = function() {
-                        fetch('settings.php', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/x-www-form-urlencoded',
-                                'X-CSRF-Token': '<?= $_SESSION['csrf_token'] ?>'
-                            },
-                            body: `delete_category_ajax=1&id=${categoryId}`
-                        })
-                        .then(response => response.json())
-                        .then(data => {
+                    document.getElementById('confirmDeleteCategory').onclick = async function() {
+                        const body = new URLSearchParams();
+                        body.append('delete_category_ajax', '1');
+                        body.append('id', categoryId);
+                        body.append('csrf_token', CSRF_TOKEN);
+
+                        try {
+                            const response = await fetch('settings.php', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/x-www-form-urlencoded',
+                                    'X-CSRF-Token': CSRF_TOKEN
+                                },
+                                body: body.toString()
+                            });
+                            const data = await response.json();
+                            modal.hide();
                             if (data.success) {
-                                alert('Category deleted successfully.');
-                                window.location.reload();
+                                window.location.href = 'settings.php#categories';
                             } else {
-                                alert('Failed to delete category: ' + data.message);
+                                alert(data.message || 'Failed to delete category.');
                             }
-                        })
-                        .catch(error => {
-                            console.error('Error:', error);
+                        } catch (error) {
                             alert('An error occurred while deleting the category.');
-                        });
-                        
-                        modal.hide();
+                        }
                     };
                     
                     modal.show();
@@ -1391,7 +1397,7 @@ $default_budget_goals = [
             const themeRadios = document.querySelectorAll('input[name="theme"]');
             themeRadios.forEach(radio => {
                 radio.addEventListener('change', function() {
-                    document.body.className = this.value + '-mode';
+                    document.documentElement.setAttribute('data-theme', this.value);
                 });
             });
 
@@ -1410,20 +1416,75 @@ $default_budget_goals = [
                 document.getElementById('fileInfo').className = 'file-input-info text-success';
             });
 
-            // Import form validation
             document.getElementById('importForm').addEventListener('submit', function(e) {
                 const fileInput = document.getElementById('importFile');
-                if (!fileInput.value) {
+                const fileName = fileInput.value.toLowerCase();
+                if (!fileName) {
                     e.preventDefault();
                     alert('Please select a file to import.');
                     fileInput.focus();
-                } else if (!fileInput.value.toLowerCase().endsWith('.csv') && !fileInput.value.toLowerCase().endsWith('.xls') && !fileInput.value.toLowerCase().endsWith('.xlsx')) {
+                } else if (!fileName.endsWith('.csv')) {
                     e.preventDefault();
-                    alert('Only CSV or Excel files are supported for import.');
+                    alert('Only CSV files are supported for import.');
                     fileInput.focus();
                 }
             });
+
+            applyThemeFromSession();
         });
+
+        async function loadPrivacySessions() {
+            const list = document.getElementById('privacySessionsList');
+            if (!list) return;
+
+            const body = new FormData();
+            body.append('action', 'list_sessions');
+            body.append('csrf_token', CSRF_TOKEN);
+
+            try {
+                const response = await fetch('php/account_actions.php', { method: 'POST', body });
+                const data = await response.json();
+                if (!data.success || !data.sessions.length) {
+                    list.innerHTML = '<div class="list-group-item text-muted">No active sessions.</div>';
+                    return;
+                }
+                list.innerHTML = '';
+                data.sessions.forEach(session => {
+                    const item = document.createElement('div');
+                    item.className = 'list-group-item';
+                    item.innerHTML = `
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>${escapeHtml(session.device_name)}</strong>
+                                ${session.is_current ? '<span class="badge bg-primary ms-1">Current</span>' : ''}
+                                <div class="text-muted small">${escapeHtml(session.location_label)}</div>
+                                <small class="text-muted">${session.is_current ? 'Now' : escapeHtml(session.last_active)}</small>
+                            </div>
+                        </div>`;
+                    list.appendChild(item);
+                });
+            } catch (e) {
+                list.innerHTML = '<div class="list-group-item text-danger">Could not load sessions.</div>';
+            }
+        }
+
+        function applyThemeFromSession() {
+            const theme = <?= json_encode($_SESSION['theme'] ?? $user['theme'] ?? 'light') ?>;
+            document.documentElement.removeAttribute('data-theme');
+            if (theme === 'system') {
+                if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                }
+            } else if (theme !== 'light') {
+                document.documentElement.setAttribute('data-theme', theme);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text ?? '';
+            return div.innerHTML;
+        }
     </script>
 </body>
 </html>

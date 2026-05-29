@@ -1,4 +1,6 @@
 <?php
+session_start();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email'])) {
     $email = trim($_POST['email']);
 
@@ -7,9 +9,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email'])) {
         header("Location: ../reset_password.php?email=" . urlencode($email));
         exit();
     } else {
-        echo "Invalid email address.";
+        $_SESSION['error'] = "Invalid email address.";
+        header("Location: ../forgot_password.php");
+        exit();
     }
 } else {
-    echo "Email not provided.";
+    $_SESSION['error'] = "Email not provided.";
+    header("Location: ../forgot_password.php");
+    exit();
 }
 ?>

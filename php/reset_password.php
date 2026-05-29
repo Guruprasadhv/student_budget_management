@@ -5,8 +5,7 @@ session_start();
 // CSRF protection
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-        http_response_code(403);
-        echo "Invalid CSRF token.";
+        header("Location: ../reset_password.php?error=" . urlencode("Invalid CSRF token."));
         exit();
     }
 
@@ -16,14 +15,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Validate input
     if (empty($email) || empty($new_password)) {
-        http_response_code(400);
-        echo "Email and new password are required.";
+        header("Location: ../reset_password.php?email=" . urlencode($email) . "&error=" . urlencode("Email and new password are required."));
         exit();
     }
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        http_response_code(400);
-        echo "Invalid email format.";
+        header("Location: ../reset_password.php?email=" . urlencode($email) . "&error=" . urlencode("Invalid email format."));
         exit();
     }
 
@@ -41,20 +38,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($stmt->execute()) {
         if ($stmt->affected_rows > 0) {
             // Success: redirect or return JSON
-            echo "✅ Password reset successfully. <a href='../index.php'>Login</a>";
+            header("Location: ../reset_password.php?success=" . urlencode("Password reset successfully. You can now login."));
+            exit();
         } else {
-            http_response_code(404);
-            echo "⚠️ Email not found in the system.";
+            header("Location: ../reset_password.php?email=" . urlencode($email) . "&error=" . urlencode("Email not found in the system."));
+            exit();
         }
     } else {
-        http_response_code(500);
-        echo "❌ Error resetting password: " . $stmt->error;
+        header("Location: ../reset_password.php?email=" . urlencode($email) . "&error=" . urlencode("Error resetting password."));
+        exit();
     }
 
     $stmt->close();
     $conn->close();
 } else {
-    http_response_code(405);
-    echo "❌ Invalid request.";
+    header("Location: ../reset_password.php?error=" . urlencode("Invalid request."));
+    exit();
 }
 ?>

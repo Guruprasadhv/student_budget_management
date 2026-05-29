@@ -17,11 +17,13 @@ A web-based application to help students track their income, expenses, and manag
 ---
 
 ## Features
-- User registration and login
-- Add, view, and categorize income and expenses
-- Visual reports and charts (income vs expenses, category breakdown, trends)
-- Account management and settings
-- Password reset functionality
+- **User Authentication**: Secure user registration, login, and robust password reset functionality.
+- **Transaction Tracking**: Add, view, and categorize income and expenses effortlessly.
+- **Visual Analytics**: Dynamic, interactive charts and graphs (income vs expenses, category breakdown, and monthly trends) powered by Chart.js.
+- **Comprehensive Account Management**: Manage personal preferences, security settings, active sessions, and profile customizations.
+- **Consolidated 14-Language Localization**: Full localized interface support for 14 regional and international languages (English, Hindi, Kannada, Telugu, Tamil, Malayalam, Marathi, Gujarati, Bengali, Spanish, French, German, Arabic, and Thai) housed in a single, high-reliability monolithic dictionary.
+- **Real-Time Phonetic Transliteration**: Proper nouns and custom registered user names dynamically transliterate to native scripts (such as Kannada, Hindi, and Telugu) in real-time using Google Input Tools integration, with a built-in session-based cache for instantaneous subsequent load speeds and offline-resilience.
+- **Instant Language Switching**: Dynamic page-wide translation updates automatically trigger the moment a language select option is chosen, without requiring manual form submissions.
 
 ---
 
@@ -69,6 +71,7 @@ A web-based application to help students track their income, expenses, and manag
 - `account.php` - Account details
 - `settings.php` - User settings
 - `reset_password.php`, `forgot_password.php` - Password reset features
+- `php/languages.php` - Unified, monolithic 14-language dictionary and phonetic translation engine. Handles dynamic language loading, session initialization, fallback mappings, and Google Transliterate API calls.
 - `php/` - Backend PHP scripts (database, authentication, etc.)
 - `assets/` - CSS, JS, and icon assets
 - `screenshot/` - Project screenshots for documentation

@@ -181,3 +181,29 @@ ALTER TABLE settings
   ADD COLUMN monthly_savings_goal DECIMAL(10,2) DEFAULT 0.00,
   ADD COLUMN weekly_spending_limit DECIMAL(10,2) DEFAULT 0.00,
   ADD COLUMN budget_reset_day VARCHAR(20) DEFAULT '1st of the month';
+
+-- Account security & connected accounts
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    session_id VARCHAR(128) NOT NULL,
+    device_name VARCHAR(120) NOT NULL DEFAULT 'Unknown Device',
+    ip_address VARCHAR(45) DEFAULT NULL,
+    location_label VARCHAR(120) DEFAULT 'Unknown',
+    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_session (session_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS connected_accounts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    provider ENUM('bank', 'paypal', 'card') NOT NULL,
+    account_name VARCHAR(120) NOT NULL,
+    account_identifier VARCHAR(120) DEFAULT NULL,
+    last_four VARCHAR(4) DEFAULT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    connected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);

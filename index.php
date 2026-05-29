@@ -10,7 +10,7 @@ if (isset($_SESSION['user_id'])) {
 <head>
     <meta charset="UTF-8">
     <title>Login - Student Budget Tracker</title>
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="assets/bootstrap/css/bootstrap.min.css">
 </head>
 <body class="bg-light">
      <a href="https://guruprasadhv.github.io/student_budget_management/" target="_blank" class="overlay-btn">Live Demo</a>
@@ -25,17 +25,17 @@ if (isset($_SESSION['user_id'])) {
             <?php endif; ?>
 
             <form action="php/login.php" method="post">
-                <div class="form-group">
-                    <label for="email">Email address</label>
+                <div class="mb-3">
+                    <label for="email" class="form-label">Email address</label>
                     <input type="email" class="form-control" id="email" name="email" placeholder="Enter email" required>
                 </div>
 
-                <div class="form-group">
-                    <label for="password">Password</label>
+                <div class="mb-3">
+                    <label for="password" class="form-label">Password</label>
                     <input type="password" class="form-control" id="password" name="password" placeholder="Enter password" required>
                 </div>
 
-                <button type="submit" class="btn btn-primary btn-block">Login</button>
+                <button type="submit" class="btn btn-primary w-100">Login</button>
             </form>
 
             <div class="text-center mt-3">
