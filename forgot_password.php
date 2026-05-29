@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <title>Forgot Password</title>
     <link rel="stylesheet" href="assets/bootstrap/css/bootstrap.min.css">
+    <link rel="stylesheet" href="assets/bootstrap-icons-1.13.1/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="bg-light">
     <div class="container d-flex justify-content-center align-items-center" style="height: 100vh;">
@@ -21,5 +23,6 @@
             </div>
         </div>
     </div>
+    <script src="assets/bootstrap/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

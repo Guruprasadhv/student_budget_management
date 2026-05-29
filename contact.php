@@ -10,6 +10,7 @@ require_once __DIR__ . '/php/languages.php';
     <title><?= __('contact_support') ?> - <?= __('student_budget_tracker') ?></title>
     <link href="assets/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/bootstrap-icons-1.13.1/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/style.css">
     <style>
         body {
             background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);

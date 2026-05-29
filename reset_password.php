@@ -25,6 +25,8 @@ $token = filter_input(INPUT_GET, 'token', FILTER_SANITIZE_STRING);
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;">
     <title>Reset Password - Student Budget Tracker</title>
     <link href="assets/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="assets/bootstrap-icons-1.13.1/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/style.css">
     <style>
         body {
             background-color: #f8f9fa;
@@ -172,5 +174,6 @@ $token = filter_input(INPUT_GET, 'token', FILTER_SANITIZE_STRING);
             });
         });
     </script>
+    <script src="assets/bootstrap/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

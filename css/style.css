@@ -1,0 +1,176 @@
+/* Student Budget Management - Global Styles */
+
+:root {
+    --accent-color: #0d6efd;
+    --primary-bg-color: #f8f9fa;
+    --secondary-bg-color: #ffffff;
+    --text-color: #212529;
+    --card-bg: #ffffff;
+    --border-color: #dee2e6;
+}
+
+[data-theme="dark"] {
+    --primary-bg-color: #121212;
+    --secondary-bg-color: #1e1e1e;
+    --text-color: #e0e0e0;
+    --card-bg: #1e1e1e;
+    --border-color: #2d2d2d;
+}
+
+[data-theme="read"] {
+    --primary-bg-color: #f8f5f2;
+    --secondary-bg-color: #f1e9e0;
+    --text-color: #3a3a3a;
+    --card-bg: #f1e9e0;
+    --border-color: #d9d1c7;
+}
+
+@media (prefers-color-scheme: dark) {
+    [data-theme="system"] {
+        --primary-bg-color: #121212;
+        --secondary-bg-color: #1e1e1e;
+        --text-color: #e0e0e0;
+        --card-bg: #1e1e1e;
+        --border-color: #2d2d2d;
+    }
+}
+
+body {
+    background-color: var(--primary-bg-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.card,
+.list-group-item,
+.modal-content,
+.table {
+    background-color: var(--card-bg) !important;
+    color: var(--text-color) !important;
+    border-color: var(--border-color) !important;
+}
+
+.table th,
+.table td {
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.form-control,
+.form-select {
+    background-color: var(--secondary-bg-color) !important;
+    color: var(--text-color) !important;
+    border-color: var(--border-color) !important;
+}
+
+.form-control:focus,
+.form-select:focus {
+    background-color: var(--secondary-bg-color) !important;
+    color: var(--text-color) !important;
+}
+
+/* Navbar */
+[data-theme="dark"] .navbar {
+    background-color: #1e1e1e !important;
+    border-bottom: 1px solid #2d2d2d;
+}
+
+[data-theme="read"] .navbar {
+    background-color: #e5dacb !important;
+    border-bottom: 1px solid #d9d1c7;
+}
+
+[data-theme="read"] .navbar-brand,
+[data-theme="read"] .nav-link {
+    color: #3a3a3a !important;
+}
+
+[data-theme="read"] .nav-link i {
+    color: #3a3a3a !important;
+}
+
+/* Card headers */
+[data-theme="dark"] .card-header.bg-primary {
+    background-color: #1e1e1e !important;
+    border-bottom: 1px solid #2d2d2d !important;
+    color: #e0e0e0 !important;
+}
+
+[data-theme="read"] .card-header.bg-primary {
+    background-color: #f1e9e0 !important;
+    border-bottom: 1px solid #d9d1c7 !important;
+    color: #3a3a3a !important;
+}
+
+[data-theme="read"] .card-header.bg-primary h5 {
+    color: #3a3a3a !important;
+}
+
+/* Primary buttons */
+[data-theme="dark"] .btn-primary {
+    background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%) !important;
+    border-color: #4f46e5 !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
+    transition: all 0.2s ease;
+}
+
+[data-theme="dark"] .btn-primary:hover {
+    background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%) !important;
+    border-color: #6366f1 !important;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+}
+
+[data-theme="read"] .btn-primary {
+    background-color: #5c544c !important;
+    border-color: #5c544c !important;
+    color: #ffffff !important;
+    transition: all 0.2s ease;
+}
+
+[data-theme="read"] .btn-primary:hover {
+    background-color: #4a433d !important;
+    border-color: #4a433d !important;
+    transform: translateY(-1px);
+}
+
+@media (prefers-color-scheme: dark) {
+    [data-theme="system"] .navbar {
+        background-color: #1e1e1e !important;
+        border-bottom: 1px solid #2d2d2d;
+    }
+
+    [data-theme="system"] .card-header.bg-primary {
+        background-color: #1e1e1e !important;
+        border-bottom: 1px solid #2d2d2d !important;
+        color: #e0e0e0 !important;
+    }
+
+    [data-theme="system"] .btn-primary {
+        background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%) !important;
+        border-color: #4f46e5 !important;
+        color: #ffffff !important;
+    }
+}
+
+/* Overlay demo button */
+.overlay-btn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 9999;
+    background-color: var(--accent-color);
+    color: #fff;
+    padding: 8px 16px;
+    border-radius: 20px;
+    text-decoration: none;
+    font-size: 0.85rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    transition: opacity 0.2s;
+}
+
+.overlay-btn:hover {
+    opacity: 0.85;
+    color: #fff;
+}

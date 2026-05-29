@@ -16,6 +16,8 @@ if ($conn === null) {
     <title>Register - Student Budget Tracker</title>
 
     <link rel="stylesheet" href="assets/bootstrap/css/bootstrap.min.css">
+    <link rel="stylesheet" href="assets/bootstrap-icons-1.13.1/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/style.css">
 
     <style>
         /* ... your styles ... */
@@ -91,5 +93,6 @@ if ($conn === null) {
 
 </div>
 
+    <script src="assets/bootstrap/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

@@ -11,6 +11,8 @@ if (isset($_SESSION['user_id'])) {
     <meta charset="UTF-8">
     <title>Login - Student Budget Tracker</title>
     <link rel="stylesheet" href="assets/bootstrap/css/bootstrap.min.css">
+    <link rel="stylesheet" href="assets/bootstrap-icons-1.13.1/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="bg-light">
      <a href="https://guruprasadhv.github.io/student_budget_management/" target="_blank" class="overlay-btn">Live Demo</a>
@@ -44,5 +46,6 @@ if (isset($_SESSION['user_id'])) {
             </div>
         </div>
     </div>
+    <script src="assets/bootstrap/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
